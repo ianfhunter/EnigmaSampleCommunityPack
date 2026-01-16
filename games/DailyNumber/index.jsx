@@ -1,18 +1,25 @@
 /**
  * Daily Number - Sample Community Game
  *
- * Demonstrates how community pack games can use backend APIs.
- * Guess the secret number between 1-100!
+ * Demonstrates how community pack games can use:
+ * - The Enigma SDK (@enigma) for shared components and utilities
+ * - Backend APIs through createPackApi
  *
  * This game uses the backend plugin at /api/packs/sample-community/
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import GameHeader from '../../components/GameHeader';
+import {
+  GameHeader,
+  GiveUpButton,
+  StatsPanel,
+  GameResult,
+  createPackApi,
+} from '@enigma';
 import styles from './DailyNumber.module.css';
 
-// API base path matches the pack ID in manifest.js
-const API_BASE = '/api/packs/sample-community';
+// Create API client for this pack
+const api = createPackApi('sample-community');
 
 export default function DailyNumber() {
   const [challenge, setChallenge] = useState(null);
@@ -27,8 +34,7 @@ export default function DailyNumber() {
 
   // Fetch today's challenge
   useEffect(() => {
-    fetch(`${API_BASE}/daily-challenge`)
-      .then(res => res.json())
+    api.get('/daily-challenge')
       .then(data => {
         setChallenge(data);
         setLoading(false);
@@ -39,14 +45,12 @@ export default function DailyNumber() {
       });
 
     // Fetch leaderboard
-    fetch(`${API_BASE}/leaderboard`)
-      .then(res => res.json())
+    api.get('/leaderboard')
       .then(data => setLeaderboard(data.leaderboard || []))
       .catch(() => {});
 
     // Fetch user stats
-    fetch(`${API_BASE}/my-stats`)
-      .then(res => res.ok ? res.json() : null)
+    api.get('/my-stats')
       .then(data => setMyStats(data))
       .catch(() => {});
   }, []);
@@ -59,13 +63,10 @@ export default function DailyNumber() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/guess`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guess: numGuess, date: challenge?.date })
+      const data = await api.post('/guess', {
+        guess: numGuess,
+        date: challenge?.date
       });
-
-      const data = await res.json();
 
       setAttempts(prev => [...prev, { guess: numGuess, result: data.result }]);
       setGuess('');
@@ -75,14 +76,10 @@ export default function DailyNumber() {
         setGameOver(true);
 
         // Submit score
-        fetch(`${API_BASE}/submit-score`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            attempts: attempts.length + 1,
-            won: true,
-            date: challenge?.date
-          })
+        api.post('/submit-score', {
+          attempts: attempts.length + 1,
+          won: true,
+          date: challenge?.date
         }).catch(() => {});
       }
     } catch (err) {
@@ -103,10 +100,18 @@ export default function DailyNumber() {
     setWon(false);
   };
 
+  // Play again (reset state)
+  const handlePlayAgain = () => {
+    setAttempts([]);
+    setGameOver(false);
+    setWon(false);
+    setGuess('');
+  };
+
   if (loading) {
     return (
       <div className={styles.container}>
-        <GameHeader title="Daily Number" icon="🔢" />
+        <GameHeader title="Daily Number" />
         <div className={styles.loading}>Loading challenge...</div>
       </div>
     );
@@ -115,7 +120,7 @@ export default function DailyNumber() {
   if (error) {
     return (
       <div className={styles.container}>
-        <GameHeader title="Daily Number" icon="🔢" />
+        <GameHeader title="Daily Number" />
         <div className={styles.error}>
           <p>{error}</p>
           <p className={styles.hint}>
@@ -128,7 +133,10 @@ export default function DailyNumber() {
 
   return (
     <div className={styles.container}>
-      <GameHeader title="Daily Number" icon="🔢" />
+      <GameHeader
+        title="🔢 Daily Number"
+        instructions="Guess the secret number between 1 and 100!"
+      />
 
       <div className={styles.game}>
         <div className={styles.challengeInfo}>
@@ -156,23 +164,26 @@ export default function DailyNumber() {
               </button>
             </div>
 
-            <button onClick={handleGiveUp} className={styles.giveUpButton}>
-              Give Up
-            </button>
+            <GiveUpButton
+              onGiveUp={handleGiveUp}
+              requireConfirm={true}
+              className={styles.giveUpButton}
+            />
           </div>
         ) : (
-          <div className={styles.result}>
-            {won ? (
-              <>
-                <h3 className={styles.winMessage}>🎉 Correct!</h3>
-                <p>You got it in {attempts.length} {attempts.length === 1 ? 'attempt' : 'attempts'}!</p>
-              </>
-            ) : (
-              <>
-                <h3 className={styles.loseMessage}>Better luck tomorrow!</h3>
-              </>
-            )}
-          </div>
+          <GameResult
+            state={won ? 'won' : 'gaveup'}
+            message={won
+              ? `You got it in ${attempts.length} ${attempts.length === 1 ? 'attempt' : 'attempts'}!`
+              : 'Better luck tomorrow!'
+            }
+            stats={won ? [
+              { label: 'Attempts', value: attempts.length },
+            ] : []}
+            actions={[
+              { label: 'Play Again', onClick: handlePlayAgain, primary: true },
+            ]}
+          />
         )}
 
         {attempts.length > 0 && (
@@ -211,23 +222,14 @@ export default function DailyNumber() {
           )}
 
           {myStats && (
-            <div className={styles.stats}>
-              <h3>📊 Your Stats</h3>
-              <div className={styles.statGrid}>
-                <div className={styles.stat}>
-                  <span className={styles.statValue}>{myStats.totalGames}</span>
-                  <span className={styles.statLabel}>Games</span>
-                </div>
-                <div className={styles.stat}>
-                  <span className={styles.statValue}>{myStats.wins}</span>
-                  <span className={styles.statLabel}>Wins</span>
-                </div>
-                <div className={styles.stat}>
-                  <span className={styles.statValue}>{myStats.avgAttempts || '-'}</span>
-                  <span className={styles.statLabel}>Avg Guesses</span>
-                </div>
-              </div>
-            </div>
+            <StatsPanel
+              stats={[
+                { label: 'Games', value: myStats.totalGames, icon: '🎮' },
+                { label: 'Wins', value: myStats.wins, icon: '🏆' },
+                { label: 'Avg Guesses', value: myStats.avgAttempts || '-', icon: '📊' },
+              ]}
+              layout="grid"
+            />
           )}
         </div>
       </div>
