@@ -15,7 +15,7 @@
 const sampleCommunityPack = {
   id: 'sample-community',
   type: 'community',
-  name: 'Sample Community Pack',
+  name: 'EnigmaSampleCommunityPack',
   description: 'A demo pack showing how community packs with backends work. Features a daily number guessing challenge!',
   icon: '🌟',
   color: '#8b5cf6',
@@ -27,7 +27,7 @@ const sampleCommunityPack = {
 
   categories: [
     {
-      name: 'Community Examples',
+      name: 'The Not-Fun Games Pack',
       icon: '🌟',
       description: 'Example games showing community pack features',
       games: [
