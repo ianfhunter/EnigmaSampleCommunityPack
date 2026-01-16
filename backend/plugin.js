@@ -4,12 +4,17 @@
  * This demonstrates how community packs can add backend functionality.
  * The plugin can:
  * - Register API routes
- * - Access the database
- * - Use authentication
- * - Run database migrations
+ * - Access its own ISOLATED database (cannot touch core tables!)
+ * - Use authentication via context.requireAuth
+ * - Access limited user info via context.core APIs
+ * - Run database migrations on its isolated database
  *
  * Routes are mounted at /api/packs/{pack-id}/
  * For this pack: /api/packs/sample-community/
+ *
+ * 🔒 SECURITY: This plugin has its own SQLite database.
+ *    It CANNOT access users, sessions, or other core data directly.
+ *    Use context.core.* APIs for read-only access to user info.
  */
 
 export default {
@@ -19,6 +24,7 @@ export default {
   /**
    * Database migrations for this plugin
    * Run automatically when the plugin loads
+   * NOTE: These run on the plugin's ISOLATED database, not the core database!
    */
   migrations: [
     {
@@ -102,6 +108,7 @@ export default {
       const today = date || new Date().toISOString().split('T')[0];
 
       // Check if user already submitted for today
+      // NOTE: Using plugin's isolated database (context.db)
       const existing = context.db.get(
         'SELECT id FROM daily_number_scores WHERE user_id = ? AND date = ?',
         [user.id, today]
@@ -111,7 +118,7 @@ export default {
         return res.status(400).json({ error: 'Already submitted for today' });
       }
 
-      // Save score
+      // Save score to plugin's isolated database
       context.db.run(
         'INSERT INTO daily_number_scores (user_id, date, attempts, won) VALUES (?, ?, ?, ?)',
         [user.id, today, attempts, won ? 1 : 0]
@@ -122,28 +129,33 @@ export default {
 
     /**
      * Get leaderboard for today
+     * NOTE: We can't JOIN with users table directly (isolated database)
+     *       Instead, we fetch scores first, then use context.core.getUsers()
      */
     router.get('/leaderboard', (req, res) => {
       const today = new Date().toISOString().split('T')[0];
 
+      // Fetch scores from plugin's isolated database
       const scores = context.db.all(`
         SELECT
-          dns.user_id,
-          dns.attempts,
-          dns.won,
-          u.username
-        FROM daily_number_scores dns
-        LEFT JOIN users u ON dns.user_id = u.id
-        WHERE dns.date = ? AND dns.won = 1
-        ORDER BY dns.attempts ASC
+          user_id,
+          attempts,
+          won
+        FROM daily_number_scores
+        WHERE date = ? AND won = 1
+        ORDER BY attempts ASC
         LIMIT 10
       `, [today]);
+
+      // Get usernames via the secure core API (read-only access)
+      const userIds = scores.map(s => s.user_id).filter(Boolean);
+      const usernameMap = context.core.getUsernameMap(userIds);
 
       res.json({
         date: today,
         leaderboard: scores.map((s, i) => ({
           rank: i + 1,
-          username: s.username || 'Anonymous',
+          username: usernameMap.get(s.user_id) || 'Anonymous',
           attempts: s.attempts
         }))
       });
@@ -155,6 +167,7 @@ export default {
     router.get('/my-stats', context.requireAuth, (req, res) => {
       const user = context.getCurrentUser(req);
 
+      // Query plugin's isolated database
       const stats = context.db.get(`
         SELECT
           COUNT(*) as total_games,
